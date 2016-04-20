@@ -1,6 +1,6 @@
 require 'rubygems'
 
-require 'net/http'
+require 'rest-client'
 require 'json'
 require 'openstudio'
 require 'fileutils'
@@ -8,57 +8,71 @@ require 'fileutils'
 @user = 'user'
 @pass = 'password'
 @host = 'http://localhost:1234'
-@host = '127.0.0.1'
-@port = '1234'
+@measure_dir = 'E:/openstudio-measures/NREL working measures'
 
-
-def load_osm(osm_path)
-
-  path = "/load_osm"
-  payload ={
-    :osm_path => osm_path
-  }.to_json
+def update_measures(measures_dir)
+               
+  json_request = JSON.generate({:measures_dir => measures_dir})
+  request = RestClient::Resource.new("#{@host}/update_measures", user: @user, password: @pass)
+  response = request.post(json_request, content_type: :json, accept: :json)
   
-  req = Net::HTTP::Post.new(path, initheader = {'Content-Type' =>'application/json'})
-  req.basic_auth @user, @pass
-  req.body = payload
-  response = Net::HTTP.new(@host, @port).start {|http| http.request(req) }
-  puts "Response #{response.code} #{response.message}:\n #{response.body}"
+  result = []
+  if response.code == 200
+    result = JSON.parse(response.body, :symbolize_names => true)
+  else
+    raise response.body
+  end
+  
+  return result
 end
 
-def create_measure(measure_path, name, class_name, taxonomy_tag, measure_type, description, modeler_description)
+
+def compute_arguments(measure_dir, osm_path)
                
-  path = "/create_measure"
-  payload ={
-    :measure_path => measure_path,
-    :name => name, 
-    :class_name => class_name, 
-    :taxonomy_tag => taxonomy_tag,
-    :measure_type => measure_type, 
-    :description => description, 
-    :modeler_description => modeler_description
-  }.to_json
+  json_request = JSON.generate({:measure_dir => measure_dir, :osm_path => osm_path})
+  request = RestClient::Resource.new("#{@host}/compute_arguments", user: @user, password: @pass)
+  response = request.post(json_request, content_type: :json, accept: :json)
   
-  req = Net::HTTP::Post.new(path, initheader = {'Content-Type' =>'application/json'})
-  req.basic_auth @user, @pass
-  req.body = payload
-  response = Net::HTTP.new(@host, @port).start {|http| http.request(req) }
-  puts "Response #{response.code} #{response.message}:\n #{response.body}"
+  result = {}
+  if response.code == 200
+    result = JSON.parse(response.body, :symbolize_names => true)
+  else
+    raise response.body
+  end
+  
+  return result
 end
 
-def compute_arguments(measure_path, osm_path)
+def create_measure(measure_dir, name, class_name, taxonomy_tag, measure_type, description, modeler_description)
                
-  path = "/compute_arguments"
-  payload ={
-    :measure_path => measure_path,
-    :osm_path => osm_path
-  }.to_json
+  json_request = JSON.generate({:measure_dir => measure_dir, :name => name, :class_name => class_name, :taxonomy_tag => taxonomy_tag,:measure_type => measure_type, :description => description, :modeler_description => modeler_description})
+  request = RestClient::Resource.new("#{@host}/create_measure", user: @user, password: @pass)
+  response = request.post(json_request, content_type: :json, accept: :json)
   
-  req = Net::HTTP::Post.new(path, initheader = {'Content-Type' =>'application/json'})
-  req.basic_auth @user, @pass
-  req.body = payload
-  response = Net::HTTP.new(@host, @port).start {|http| http.request(req) }
-  puts "Response #{response.code} #{response.message}:\n #{response.body}"
+  result = {}
+  if response.code == 200
+    result = JSON.parse(response.body, :symbolize_names => true)
+  else
+    raise response.body
+  end
+  
+  return result
+end
+
+def duplicate_measure(old_measure_dir, measure_dir, name, class_name, taxonomy_tag, measure_type, description, modeler_description)
+               
+  json_request = JSON.generate({:old_measure_dir => old_measure_dir, :measure_dir => measure_dir, :name => name, :class_name => class_name, :taxonomy_tag => taxonomy_tag,:measure_type => measure_type, :description => description, :modeler_description => modeler_description})
+  request = RestClient::Resource.new("#{@host}/duplicate_measure", user: @user, password: @pass)
+  response = request.post(json_request, content_type: :json, accept: :json)
+  
+  result = {}
+  if response.code == 200
+    result = JSON.parse(response.body, :symbolize_names => true)
+  else
+    raise response.body
+  end
+  
+  return result
 end
 
 if File.exist?('./output/')
@@ -66,14 +80,22 @@ if File.exist?('./output/')
 end
 FileUtils.mkdir_p('./output/')
 
+osm_path = './output/model.osm'
 model = OpenStudio::Model::exampleModel
-model.save('./output/model.osm', true)
+model.save(osm_path, true)
 
-load_osm('./output/model.osm')
+measures = update_measures(@measure_dir)
+puts measures
 
-create_measure('./output/new_measure/', 'New Measure', 'NewMeasure', 'None.None', 'ModelMeasure', 'Description', 'Modeler Description')
+measures.each do |measure|
+  info = compute_arguments(measure[:measure_dir], osm_path)
+  puts info
+end
 
-compute_arguments('./output/new_measure/', './output/model.osm')
-compute_arguments('./output/new_measure/', './output/model.osm')
-compute_arguments('./output/new_measure/', './output/model.osm')
-compute_arguments('./output/new_measure/', './output/model.osm')
+measure_dir = './output/NewMeasure'
+result = create_measure(measure_dir, "NewMeasure", "NewMeasure", "Envelope.Form", "ModelMeasure", "No description", "No modeler description")
+puts result
+
+new_measure_dir = './output/NewMeasureCopy'
+result = duplicate_measure(measure_dir, new_measure_dir, "NewMeasureCopy", "NewMeasureCopy", "Envelope.Form", "ModelMeasure", "No description again", "No modeler description again")
+puts result
