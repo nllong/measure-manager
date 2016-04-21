@@ -4,36 +4,35 @@ require 'webrick'
 require 'json'
 require 'openstudio'
 
-class MyServlet < WEBrick::HTTPServlet::AbstractServlet
-
-  @@instance = nil
+class MeasureManager
   
-  def initialize(server)
-    super
-    
-    @mutex = Mutex.new
+  attr_reader :osms, :measures, :measure_info
+  
+  def initialize()
     @osms = {} # osm_path => {:checksum, :model, :workspace}
     @measures = {} # measure_dir => BCLMeasure
     @measure_info = {} # measure_dir => {osm_path => RubyUserScriptInfo}
     
     eval(OpenStudio::Ruleset::infoExtractorRubyFunction)
   end
-  
-  def self.get_instance(server, *options)
-    @@instance = self.new(server, *options) if @@instance.nil?
-    return @@instance
-  end
-  
+
   def print_message(message)
-    #puts message
+    puts message
   end
   
-  # returns nil or [OpenStudio::Model::Model, OpenStudio::Workspace], force_reload forces the model to be read from disk
+  def reset
+    @osms = {}
+    @measures = {} 
+    @measure_info = {}
+  end
+  
+  # returns nil or [OpenStudio::Model::Model, OpenStudio::Workspace]
+  # force_reload forces the model to be read from disk, should never be needed
   def get_model(osm_path, force_reload)
 
     # check if model exists on disk
     if !File.exist?(osm_path)
-      print_message("Model '#{osm_path}' no longer exists on disk")
+      print_message("Model '#{osm_path}' does not exist")
       @osms[osm_path] = nil
       @measure_info.each_value {|value| value[osm_path] = nil} 
       force_reload = true
@@ -53,19 +52,23 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
             result = [model, workspace]
             print_message("Using cached model '#{osm_path}'")
           end
+        else
+          print_message("Checksum of cached model does not match current checksum for '#{osm_path}'")
         end
       end
     end
     
     if !result
       # load from disk
-      print_message("Loading model '#{osm_path}'")
+      print_message("Attempting to load model '#{osm_path}'")
       vt = OpenStudio::OSVersion::VersionTranslator.new
       model = vt.loadModel(osm_path)
         
       if model.empty?
+        print_message("Failed to load model '#{osm_path}'")
         @osms[osm_path] = nil
       else
+        print_message("Successfully loaded model '#{osm_path}'")
         model = model.get
         ft = OpenStudio::EnergyPlus::ForwardTranslator.new
         workspace = ft.translateModel(model)
@@ -79,12 +82,13 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
     return result
   end
   
-  # returns nil or OpenStudio::BCLMeasure from path, force_reload forces the measure.xml to be read from disk
+  # returns nil or OpenStudio::BCLMeasure from path
+  # force_reload forces the measure.xml to be read from disk, should only be needed if user has edited the xml
   def get_measure(measure_dir, force_reload)
     
     # check if measure exists on disk
     if !File.exist?(measure_dir) || !File.exist?(File.join(measure_dir, 'measure.xml'))
-      print_message("Measure '#{measure_dir}' no longer exists on disk")
+      print_message("Measure '#{measure_dir}' does not exist")
       @measures[measure_dir] = nil
       @measure_info[measure_dir] = {}
       force_reload = true
@@ -101,12 +105,14 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
 
     if !result
       # load from disk
-      print_message("Loading measure '#{measure_dir}'")
+      print_message("Attempting to load measure '#{measure_dir}'")
       
       measure = OpenStudio::BCLMeasure.load(measure_dir)
       if measure.empty?
+        print_message("Failed to load measure '#{measure_dir}'")
         @measures[measure_dir] = nil
       else
+        print_message("Successfully loaded measure '#{measure_dir}'")
         result = measure.get
         @measures[measure_dir] = result
       end
@@ -122,13 +128,15 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
       if file_updates || xml_updates
         print_message("Changes detected, updating '#{measure_dir}'")
 
+        # clear cache before calling get_measure_info
+        @measure_info[measure_dir] = {}
+        
         # try to load the ruby measure
         info = get_measure_info(measure_dir, result, "", OpenStudio::Model::OptionalModel.new, OpenStudio::OptionalWorkspace.new)
         info.update(result)
 
         result.save
         @measures[measure_dir] = result
-        @measure_info[measure_dir] = {}
       end
     end
     
@@ -339,6 +347,23 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
     return result
   end
   
+end
+
+class MyServlet < WEBrick::HTTPServlet::AbstractServlet
+
+  @@instance = nil
+  
+  def initialize(server)
+    super
+    @mutex = Mutex.new
+    @measure_manager = MeasureManager.new
+  end
+  
+  def self.get_instance(server, *options)
+    @@instance = self.new(server, *options) if @@instance.nil?
+    return @@instance
+  end
+  
   def do_GET(request, response)
   
     begin
@@ -353,26 +378,26 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
       when "/internal_state"
         
         osms = []
-        @osms.each_pair do |osm_path, value|  
+        @measure_manager.osms.each_pair do |osm_path, value|  
           if value
             osms << {:osm_path => osm_path, :checksum => value[:checksum]}
           end
         end
         
         measures = []
-        @measures.each_pair do |measure_dir, measure|  
+        @measure_manager.measures.each_pair do |measure_dir, measure|  
           if measure
-            measures << measure_hash(measure_dir, measure)
+            measures << @measure_manager.measure_hash(measure_dir, measure)
           end
         end
         
         measure_info = []
-        @measure_info.each_pair do |measure_dir, value|  
-          measure = @measures[measure_dir]
+        @measure_manager.measure_info.each_pair do |measure_dir, value|  
+          measure = @measure_manager.measures[measure_dir]
           if measure && value
             value.each_pair do |osm_path, info|
               if info
-                temp = measure_hash(measure_dir, measure, info)
+                temp = @measure_manager.measure_hash(measure_dir, measure, info)
                 measure_info << {:measure_dir => measure_dir, :osm_path => osm_path, :arguments => temp[:arguments]}
               end
             end
@@ -399,12 +424,20 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
       response.content_type = 'application/json'
       
       case request.path
+      when "/reset"
+        @measure_manager.reset      
+        
+        print_message("Reseting internal state")
+        
+        response.body = JSON.generate({})
+        
       when "/update_measures"
         begin
           result = []
           
           data = JSON.parse(request.body, {:symbolize_names=>true})
           measures_dir = data[:measures_dir]
+          force_reload = data[:force_reload] ? data[:force_reload] : false
 
           # loop over all directories
           Dir.glob("#{measures_dir}/*/") do |measure_dir|
@@ -412,11 +445,11 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
             measure_dir = File.expand_path(measure_dir)
             if File.directory?(measure_dir)
            
-              measure = get_measure(measure_dir, false)
+              measure = @measure_manager.get_measure(measure_dir, force_reload)
               if measure.nil?
                 print_message("Directory #{measure_dir} is not a measure")
               else
-                result << measure_hash(measure_dir, measure)
+                result << @measure_manager.measure_hash(measure_dir, measure)
               end
             end
           end
@@ -424,7 +457,7 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
           response.body = JSON.generate(result)
         rescue Exception => e  
           response.body = JSON.generate({:error=>e.message, :backtrace=>e.backtrace.inspect})
-          #response.status = 400
+          response.status = 400
         end
       
       when "/compute_arguments"
@@ -433,9 +466,10 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
           data = JSON.parse(request.body, {:symbolize_names=>true})
           measure_dir  = data[:measure_dir ]
           osm_path = data[:osm_path]
+          force_reload = data[:force_reload] ? data[:force_reload] : false
 
           measure_dir = File.expand_path(measure_dir)
-          measure = get_measure(measure_dir, false)
+          measure = @measure_manager.get_measure(measure_dir, force_reload)
           if measure.nil?
             raise "Cannot load measure at '#{measure_dir}'"
           end
@@ -444,7 +478,7 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
           workspace = OpenStudio::OptionalWorkspace.new()
           if osm_path
             osm_path = File.expand_path(osm_path)
-            value = get_model(osm_path, false)
+            value = @measure_manager.get_model(osm_path, force_reload)
             if value.nil?
               raise "Cannot load model at '#{osm_path}'"
             else
@@ -455,14 +489,14 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
             osm_path = ""
           end
           
-          info = get_measure_info(measure_dir, measure, osm_path, model, workspace)
+          info = @measure_manager.get_measure_info(measure_dir, measure, osm_path, model, workspace)
      
-          result = measure_hash(measure_dir, measure, info)
+          result = @measure_manager.measure_hash(measure_dir, measure, info)
 
           response.body = JSON.generate(result)
         rescue Exception => e  
           response.body = JSON.generate({:error=>e.message, :backtrace=>e.backtrace.inspect})
-          #response.status = 400
+          response.status = 400
         end
         
       when "/create_measure"
@@ -476,16 +510,17 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
           description = data[:description]
           modeler_description = data[:modeler_description]
           
+          # creating measure will throw if directory exists but is not empty
           measure_dir = File.expand_path(measure_dir)
           OpenStudio::BCLMeasure.new(name, class_name, measure_dir, taxonomy_tag, measure_type.to_MeasureType, description, modeler_description)
 
-          measure = get_measure(measure_dir, true)
-          result = measure_hash(measure_dir, measure)
+          measure = @measure_manager.get_measure(measure_dir, true)
+          result = @measure_manager.measure_hash(measure_dir, measure)
           
           response.body = JSON.generate(result)
         rescue Exception => e  
           response.body = JSON.generate({:error=>e.message, :backtrace=>e.backtrace.inspect})
-          #response.status = 400
+          response.status = 400
         end
 
       when "/duplicate_measure"
@@ -499,9 +534,10 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
           measure_type = data[:measure_type]
           description = data[:description]
           modeler_description = data[:modeler_description]
+          force_reload = data[:force_reload] ? data[:force_reload] : false
           
           old_measure_dir = File.expand_path(old_measure_dir)
-          old_measure = get_measure(old_measure_dir, true)
+          old_measure = @measure_manager.get_measure(old_measure_dir, force_reload)
           if old_measure.nil?
             raise "Cannot load measure at '#{old_measure_dir}'"
           end
@@ -517,18 +553,18 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
                                           old_measure.className, class_name,
                                           name, description, modeler_description)
           
-          measure = get_measure(measure_dir, true)
-          result = measure_hash(measure_dir, measure)
+          measure = @measure_manager.get_measure(measure_dir, true)
+          result = @measure_manager.measure_hash(measure_dir, measure)
           
           response.body = JSON.generate(result)
         rescue Exception => e  
           response.body = JSON.generate({:error=>e.message, :backtrace=>e.backtrace.inspect})
-          #response.status = 400
+          response.status = 400
         end
 
       else
         response.body = "Error"
-        #response.status = 400
+        response.status = 400
       end
     
     ensure
