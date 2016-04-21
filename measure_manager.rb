@@ -20,9 +20,7 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
   end
   
   def self.get_instance(server, *options)
-    if @@instance.nil?
-      @@instance = self.new(server, *options)
-    end
+    @@instance = self.new(server, *options) if @@instance.nil?
     return @@instance
   end
   
