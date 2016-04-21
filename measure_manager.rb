@@ -12,7 +12,7 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
     super
     
     @mutex = Mutex.new
-    @osms = {} # osm_path => {:checksum, :model}
+    @osms = {} # osm_path => {:checksum, :model, :workspace}
     @measures = {} # measure_dir => BCLMeasure
     @measure_info = {} # measure_dir => {osm_path => RubyUserScriptInfo}
     
@@ -30,24 +30,27 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
   
   # returns nil or [OpenStudio::Model::Model, OpenStudio::Workspace], force_reload forces the model to be read from disk
   def get_model(osm_path, force_reload)
-    result = nil
-    
+
     # check if model exists on disk
     if !File.exist?(osm_path)
       print_message("Model '#{osm_path}' no longer exists on disk")
       @osms[osm_path] = nil
+      @measure_info.each_value {|value| value[osm_path] = nil} 
       force_reload = true
     end    
 
+    result = nil
     if !force_reload
       # load from cache
       temp = @osms[osm_path]
       if temp
         current_checksum = OpenStudio::checksum(OpenStudio::toPath(osm_path))
         last_checksum = temp[:checksum]
-        if current_checksum == last_checksum
-          result = [temp[:model], temp[:workspace]]
-          if result
+        if last_checksum && current_checksum == last_checksum
+          model = temp[:model]
+          workspace = temp[:workspace]
+          if model && workspace
+            result = [model, workspace]
             print_message("Using cached model '#{osm_path}'")
           end
         end
@@ -83,6 +86,7 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
     if !File.exist?(measure_dir) || !File.exist?(File.join(measure_dir, 'measure.xml'))
       print_message("Measure '#{measure_dir}' no longer exists on disk")
       @measures[measure_dir] = nil
+      @measure_info[measure_dir] = {}
       force_reload = true
     end
   
