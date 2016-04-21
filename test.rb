@@ -85,17 +85,22 @@ model = OpenStudio::Model::exampleModel
 model.save(osm_path, true)
 
 measures = update_measures(@measure_dir)
-puts measures
+#puts measures
 
 measures.each do |measure|
   info = compute_arguments(measure[:measure_dir], osm_path)
-  puts info
+  #puts info
+end
+
+measures.each do |measure|
+  info = compute_arguments(measure[:measure_dir], osm_path)
+  #puts info
 end
 
 measure_dir = './output/NewMeasure'
 result = create_measure(measure_dir, "NewMeasure", "NewMeasure", "Envelope.Form", "ModelMeasure", "No description", "No modeler description")
-puts result
+#puts result
 
 new_measure_dir = './output/NewMeasureCopy'
 result = duplicate_measure(measure_dir, new_measure_dir, "NewMeasureCopy", "NewMeasureCopy", "Envelope.Form", "ModelMeasure", "No description again", "No modeler description again")
-puts result
+#puts result
