@@ -482,8 +482,8 @@ class MyServlet < WEBrick::HTTPServlet::AbstractServlet
             if value.nil?
               raise "Cannot load model at '#{osm_path}'"
             else
-              model = value[0]
-              workspace = value[1]
+              model = value[0].clone(true).to_Model
+              workspace = value[1].clone(true)
             end
           else
             osm_path = ""
