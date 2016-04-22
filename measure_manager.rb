@@ -1,6 +1,3 @@
-require 'rubygems'
-require 'thread'
-require 'webrick'
 require 'json'
 require 'openstudio'
 
