@@ -349,7 +349,7 @@ class MeasureManager
   
 end
 
-class MyServlet < WEBrick::HTTPServlet::AbstractServlet
+class MeasureManagerServlet < WEBrick::HTTPServlet::AbstractServlet
 
   @@instance = nil
   
@@ -581,7 +581,7 @@ end
 
 server = WEBrick::HTTPServer.new(:Port => port)
 
-server.mount "/", MyServlet
+server.mount "/", MeasureManagerServlet
 
 trap("INT") {
     server.shutdown
