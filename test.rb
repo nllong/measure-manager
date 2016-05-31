@@ -8,8 +8,9 @@ require 'fileutils'
 @user = 'user'
 @pass = 'password'
 @host = 'http://localhost:1234'
-#@measure_dir = 'E:/openstudio-measures/NREL working measures'
+# @measure_dir = 'E:/openstudio-measures/NREL working measures'
 @measure_dir = 'E:/test/measures'
+# @measure_dir = '/Users/nlong/working/OpenStudio-analysis-spreadsheet/measures'
 
 def reset()
   
@@ -109,13 +110,6 @@ model.save(osm_path, true)
 # this will succeed
 measures = update_measures(@measure_dir)
 #puts measures
-
-measures.each do |measure|
-  # these will succeed
-  info = compute_arguments(measure[:measure_dir])
-  info = compute_arguments(measure[:measure_dir], osm_path)
-  #puts info
-end
 
 measures.each do |measure|
   # these will succeed

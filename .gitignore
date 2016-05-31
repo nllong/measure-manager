@@ -1,2 +1,4 @@
 output
 out.log
+.idea
+Gemfile.lock

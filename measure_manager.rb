@@ -136,7 +136,7 @@ class MeasureManager
       @measure_info[measure_dir] = {}
     end
     
-    if result
+    if result && !@measures[measure_dir].nil?
       # see if there are updates, want to make sure to perform both checks so do outside of conditional
       file_updates = result.checkForUpdatesFiles # checks if any files have been updated
       xml_updates = result.checkForUpdatesXML # only checks if xml as loaded has been changed since last save
